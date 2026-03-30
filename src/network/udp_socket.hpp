@@ -2,9 +2,11 @@
 #include <arpa/inet.h>
 
 #include <cerrno>
+#include <cstddef>
 #include <expected>
 #include <netinet/in.h>
 #include <print>
+#include <span>
 #include <sys/socket.h>
 
 #include <netinet/in.h>
@@ -105,6 +107,18 @@ public:
       return std::unexpected{std::error_code{errno, std::system_category()}};
     }
     return {};
+  }
+
+  auto write(std::span<const uint8_t> data, const sockaddr_in &addr) noexcept
+      -> std::expected<size_t, std::error_code>
+    requires Sender<Type>
+  {
+    auto res = sendto(m_fd, data.data(), data.size_bytes(), 0,
+                      reinterpret_cast<const sockaddr *>(&addr), sizeof(addr));
+    if (res < 0) {
+      return std::unexpected(std::error_code(errno, std::system_category()));
+    }
+    return static_cast<size_t>(res);
   }
 
 private:
