@@ -121,6 +121,28 @@ public:
     return static_cast<size_t>(res);
   }
 
+  auto join_multicast_group(std::string_view multicast_ip) noexcept
+      -> std::expected<void, std::error_code>
+    requires Receiver<Type>
+  {
+    const auto mreq =
+        ip_mreq{.imr_multiaddr = {.s_addr = inet_addr(multicast_ip.data())},
+                .imr_interface = {.s_addr = htonl(INADDR_ANY)}};
+
+    // set ip level options
+    if (setsockopt(m_fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) <
+        0) {
+      return std::unexpected(std::error_code(errno, std::system_category()));
+    }
+    
+    
+    
+  }
+  // TODO
+  auto read() noexcept -> std::expected<size_t, std::error_code>
+    requires Receiver<Type>
+  {}
+
 private:
   explicit udp_socket(sockfd fd) noexcept : m_fd(fd) {}
 

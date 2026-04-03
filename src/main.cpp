@@ -1,3 +1,4 @@
+#include "client/reader.hpp"
 #include "network/udp_socket.hpp"
 #include "server/publisher.hpp"
 #include <arpa/inet.h>
@@ -7,15 +8,13 @@
 
 std::unique_ptr<publisher> global_pub;
 
-void handle_sigint(int) {
-  if (global_pub) {
-    std::println("\nInterrupt received. Stopping publisher...");
-    global_pub->stop();
-  }
-}
-
 auto main() -> int {
-  std::signal(SIGINT, handle_sigint);
+  std::signal(SIGINT, [](int) {
+    if (global_pub) {
+      std::println("\nInterrupt received. Stopping publisher...");
+      global_pub->stop();
+    }
+  });
 
   auto sender_socket_expected = udp_socket<SocketType::Sender>::try_create();
   if (not sender_socket_expected.has_value()) {

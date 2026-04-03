@@ -1,16 +1,31 @@
-
+#pragma once
 #include <atomic>
 #include <new>
 #include <vector>
+
+enum class Permissions { Read, Write, Shared };
+template <Permissions P>
+concept IsReader = P == Permissions::Read;
+template <Permissions P>
+concept IsWriter = P == Permissions::Write;
+template <Permissions P>
+concept IsShared = P == Permissions::Shared;
+
 // Adapted from https://rigtorp.se/ringbuffer/
-template <typename T,
+template <typename T, Permissions P = Permissions::Shared,
           size_t c_size = std::hardware_destructive_interference_size>
 struct lf_queue {
 
 public:
-  lf_queue(size_t capacity) : m_data(capacity) {}
+  lf_queue(size_t capacity)
+    requires IsShared<P>
+      : m_data(capacity) {}
 
-  auto push(T &&item) -> bool {
+  auto push(T &&item)
+
+      -> bool
+    requires(not IsReader<P>)
+  {
     const auto curr_index = m_write_pos.load(std::memory_order_relaxed);
     auto next_index = curr_index + 1;
     if (next_index == m_data.size()) {
@@ -31,7 +46,9 @@ public:
     return true;
   }
 
-  auto pop(T &item) -> bool {
+  auto pop(T &item) -> bool
+    requires(not IsWriter<P>)
+  {
     const auto curr_index = m_read_pos.load(std::memory_order_relaxed);
     // check against cache first
     if (curr_index == m_write_pos_cached) {
@@ -47,6 +64,18 @@ public:
     }
     m_read_pos.store(next_read_index, std::memory_order_release);
     return true;
+  }
+
+  operator lf_queue<T, Permissions::Read> &()
+    requires IsShared<P>
+  {
+    return reinterpret_cast<lf_queue<T, Permissions::Read> &>(*this);
+  }
+
+  operator lf_queue<T, Permissions::Write> &()
+    requires IsShared<P>
+  {
+    return reinterpret_cast<lf_queue<T, Permissions::Read> &>(*this);
   }
 
 private:
