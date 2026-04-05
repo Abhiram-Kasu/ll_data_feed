@@ -3,11 +3,16 @@
 #include "server/publisher.hpp"
 #include <arpa/inet.h>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <print>
 #include <ranges>
+#include <span>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -43,12 +48,56 @@ void handle_sigint(int) {
   }
 }
 
-auto main() -> int {
+auto main(int argc, char **argv) -> int {
   std::signal(SIGINT, handle_sigint);
 
+  if (argc != 3) {
+    std::println(
+        stderr,
+        "Need to specify messages per second and burst size: ./ll_data_feed "
+        "-m<Messages Per Second> -b<Burst Size>");
+    return EXIT_FAILURE;
+  }
+  auto args = std::span{argv, static_cast<size_t>(argc)}.subspan(1);
+
+  uint64_t message_count = 0, burst_size = 0;
+
+  for (size_t i = 0; i < args.size(); ++i) {
+    std::string_view arg{args[i]};
+
+    if (arg.starts_with("-m")) {
+      std::string_view val;
+      if (arg.size() > 2) {
+        val = arg.substr(2); // Attached: -m100
+      } else if (i + 1 < args.size()) {
+        val = args[++i]; // Separate: -m 100
+      }
+
+      auto [ptr, ec] =
+          std::from_chars(val.data(), val.data() + val.size(), message_count);
+      if (ec != std::errc{}) {
+        std::println(stderr, "Error: Invalid message count '{}'", val);
+        return EXIT_FAILURE;
+      }
+    } else if (arg.starts_with("-b")) {
+      std::string_view val;
+      if (arg.size() > 2) {
+        val = arg.substr(2); // Attached: -b50
+      } else if (i + 1 < args.size()) {
+        val = args[++i]; // Separate: -b 50
+      }
+
+      auto [ptr, ec] =
+          std::from_chars(val.data(), val.data() + val.size(), burst_size);
+      if (ec != std::errc{}) {
+        std::println(stderr, "Error: Invalid burst size '{}'", val);
+        return EXIT_FAILURE;
+      }
+    }
+  }
   const char *multicast_ip = "239.255.0.1";
-  const uint16_t port = 12345;
-  const int num_listeners = 10;
+  constexpr uint16_t port = 12345;
+  constexpr int num_listeners = 10;
 
   for (int i = 0; i < num_listeners; ++i) {
     auto receiver_socket_expected =
@@ -100,16 +149,12 @@ auto main() -> int {
     return 1;
   }
 
-  // Configure publisher settings (low rate to easily view reader output)
-  const uint64_t msg_per_sec = 1000;
-  const uint64_t burst_size = 500;
-
   global_pub = std::make_unique<publisher>(
-      msg_per_sec, burst_size, std::move(sender_socket_expected.value()),
+      message_count, burst_size, std::move(sender_socket_expected.value()),
       dest_addr);
 
   std::println("Starting publisher streaming to {}:{} at {} msgs/sec",
-               multicast_ip, port, msg_per_sec);
+               multicast_ip, port, message_count);
 
   global_pub->start();
 
