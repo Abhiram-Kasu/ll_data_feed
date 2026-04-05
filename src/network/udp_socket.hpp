@@ -86,13 +86,21 @@ public:
   // socket packets duplicated for each process listening on the port.
   //  Needed for udp mutlicast
   template <SocketType T = Type>
-    requires Sender<T>
+    requires Sender<T> or Receiver<T>
   auto set_socket_reuse() noexcept -> std::expected<void, std::error_code> {
     auto option = 1;
     if (setsockopt(m_fd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option)) <
         0) {
       return std::unexpected{std::error_code(errno, std::system_category())};
     }
+
+// needed for macos
+#ifdef SO_REUSEPORT
+    if (setsockopt(m_fd, SOL_SOCKET, SO_REUSEPORT, &option, sizeof(option)) <
+        0) {
+      return std::unexpected{std::error_code(errno, std::system_category())};
+    }
+#endif
     return {};
   }
   template <SocketType T = Type>
@@ -134,14 +142,21 @@ public:
         0) {
       return std::unexpected(std::error_code(errno, std::system_category()));
     }
-    
-    
-    
+
+    return {};
   }
-  // TODO
-  auto read() noexcept -> std::expected<size_t, std::error_code>
+
+  auto read(std::span<uint8_t> buffer) noexcept
+      -> std::expected<size_t, std::error_code>
     requires Receiver<Type>
-  {}
+  {
+    auto res =
+        recvfrom(m_fd, buffer.data(), buffer.size_bytes(), 0, nullptr, nullptr);
+    if (res < 0) {
+      return std::unexpected(std::error_code(errno, std::system_category()));
+    }
+    return static_cast<size_t>(res);
+  }
 
 private:
   explicit udp_socket(sockfd fd) noexcept : m_fd(fd) {}

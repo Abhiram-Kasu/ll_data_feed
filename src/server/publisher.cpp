@@ -2,6 +2,7 @@
 #include "common/types.hpp"
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <print>
 
 auto publisher::start() -> void {
@@ -26,12 +27,12 @@ auto publisher::start() -> void {
 
       for (uint32_t i = 0; i < m_burst_size; ++i) {
         auto data = MarketUpdate{
-            .seq = seq_count++,
+            .seq = ++seq_count,
             .send_timestamp_ns = static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::system_clock::now().time_since_epoch())
                     .count()),
-            .price = 100.50,
+            .price = 100.50 + ((rand() % 100) / 100.0f),
             .size = 20};
 
         auto data_raw = std::span<const uint8_t>(
