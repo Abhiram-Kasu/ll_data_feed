@@ -1,4 +1,7 @@
+#include "client/consumer.hpp"
+#include "client/lf_queue.hpp"
 #include "client/reader.hpp"
+#include "common/types.hpp"
 #include "network/udp_socket.hpp"
 #include "server/publisher.hpp"
 #include <arpa/inet.h>
@@ -11,19 +14,29 @@
 #include <memory>
 #include <print>
 #include <ranges>
+#include <ratio>
 #include <span>
 #include <string>
 #include <thread>
 #include <vector>
-
+const char *multicast_ip = "239.255.0.1";
+constexpr uint16_t port = 12345;
+constexpr int num_listeners = 1;
+constexpr size_t LF_QUEUE_SIZE = 100;
 std::unique_ptr<publisher> global_pub;
 // Use a vector to hold multiple readers
 std::vector<std::unique_ptr<reader<ReaderState::Reading>>> readers;
+
+std::vector<std::unique_ptr<consumer<std::chrono::nanoseconds>>> consumers;
 
 void handle_sigint(int) {
   if (global_pub) {
     std::println("\nInterrupt received. Stopping publisher...");
     global_pub->stop();
+  }
+
+  for (auto &consumer : consumers) {
+    consumer->stop_consuming();
   }
 
   if (!readers.empty()) {
@@ -95,9 +108,6 @@ auto main(int argc, char **argv) -> int {
       }
     }
   }
-  const char *multicast_ip = "239.255.0.1";
-  constexpr uint16_t port = 12345;
-  constexpr int num_listeners = 10;
 
   for (int i = 0; i < num_listeners; ++i) {
     auto receiver_socket_expected =
@@ -115,8 +125,11 @@ auto main(int argc, char **argv) -> int {
       return 1;
     };
 
+    auto queue = lf_queue<MarketUpdate, Permissions::Shared>(LF_QUEUE_SIZE);
+
+    auto writer_queue = queue.to_writer();
     auto r = reader<ReaderState::Initialized>(
-        nullptr, std::move(receiver_socket_expected.value()));
+        writer_queue, std::move(receiver_socket_expected.value()));
 
     auto reading_state = r.start_reading(port);
 
@@ -128,6 +141,13 @@ auto main(int argc, char **argv) -> int {
 
     readers.push_back(std::make_unique<reader<ReaderState::Reading>>(
         std::move(reading_state.value())));
+
+    auto consumer_ = std::make_unique<consumer<std::chrono::nanoseconds>>(
+        queue.to_reader(), std::chrono::nanoseconds(1));
+
+    consumer_->start_consuming();
+
+    consumers.push_back(std::move(consumer_));
   }
 
   std::println("{} Readers started on port {}.", num_listeners, port);

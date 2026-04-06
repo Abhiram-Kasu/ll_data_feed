@@ -41,6 +41,7 @@ auto publisher::start() -> void {
         if (auto res = m_sending_socket.write(data_raw, m_destination_address);
             res.has_value()) {
           total_sent++;
+
         } else {
           total_failed++;
           std::println(stderr, "Failed to send: {}", res.error().message());

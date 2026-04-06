@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <arpa/inet.h>
 #include <atomic>
+#include <cstddef>
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -30,8 +31,7 @@ struct diag {
   uint64_t num_dropped, num_received;
 };
 template <ReaderState T> struct reader {
-  using shared_lf_queue_write =
-      std::shared_ptr<lf_queue<MarketUpdate, Permissions::Write>>;
+  using lf_queue_write = lf_queue<MarketUpdate, Permissions::Write>;
   template <ReaderState> friend struct reader;
 
 private:
@@ -44,8 +44,7 @@ public:
         diagnostics(std::move(other.diagnostics)),
         reading_thread(std::move(other.reading_thread)) {}
 
-  reader(shared_lf_queue_write write_queue,
-         udp_socket<SocketType::Receiever> socket)
+  reader(lf_queue_write write_queue, udp_socket<SocketType::Receiever> socket)
     requires(T == ReaderState::Initialized)
       : write_queue(write_queue), socket(std::move(socket))
 
@@ -92,8 +91,9 @@ public:
     auto diagnostics_copy = auto(this->diagnostics);
 
     reading_thread = std::make_unique<std::jthread>(
-        [socket = std::move(socket), kq,
-         diagnostics_copy](const std::stop_token &stoken) {
+        [socket = std::move(socket), kq, diagnostics_copy,
+         write_queue_copy =
+             write_queue](const std::stop_token &stoken) mutable {
           // setup callback for stopping
           std::stop_callback stop_cb(stoken, [kq]() {
             std::println("Sending Wakeup Event");
@@ -141,18 +141,16 @@ public:
                   const auto address = inet_ntoa(sender_addr.sin_addr);
                   const auto port = ntohs(sender_addr.sin_port);
                   // reinterpret as marketupdate
-                  const auto market_update =
-                      reinterpret_cast<const MarketUpdate *>(&buffer);
+                  auto *market_update =
+                      reinterpret_cast<MarketUpdate *>(&buffer);
 
                   if (market_update->seq != last_counter_seen + 1) {
-                    std::println("Packet #{} dropped", last_counter_seen + 1);
                     diagnostics_copy->num_dropped.fetch_add(
                         1, std::memory_order_relaxed);
                   }
                   last_counter_seen = market_update->seq;
 
-                  std::println("Received update with price: {} from {}:{}",
-                               market_update->price, address, port);
+                  write_queue_copy.push(std::move(*market_update));
                   diagnostics_copy->num_received.fetch_add(
                       1, std::memory_order_relaxed);
 
@@ -184,7 +182,7 @@ private:
   {
     return reader<ReaderState::Reading>(std::move(*this));
   }
-  shared_lf_queue_write write_queue;
+  lf_queue_write write_queue;
   udp_socket<SocketType::Receiever> socket;
 
   std::unique_ptr<std::jthread> reading_thread;
